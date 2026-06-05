@@ -1,0 +1,9 @@
+# Virtual environment
+.venv/
+
+# Config file contains API tokens — never commit this
+config.properties
+
+# Python cache
+__pycache__/
+*.pyc

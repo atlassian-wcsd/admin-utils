@@ -1,70 +1,63 @@
 # Atlassian User Email Fetcher
 
-Resolves Atlassian Account IDs in a CSV file to email addresses by querying your Atlassian Organization API, then writes the emails back into the CSV.
+Resolves Atlassian Account IDs in a CSV file to email addresses by querying a specific directory in your Atlassian Organization, then updates only the resolved rows in the CSV.
+
+**No installation required** — uses `curl` and `jq`, both pre-installed on macOS.
 
 ## Files
 
 | File | Description |
 |---|---|
-| `fetch_user_emails.py` | Main script |
-| `config.properties` | All configuration (credentials, file paths, column names) |
+| `fetch_user_emails.sh` | Main script |
+| `config.properties` | Credentials, file paths, column names |
 | `sample_active_usage.csv` | Input CSV template |
-| `requirements.txt` | Python dependencies |
 
 ## Setup
-
-```bash
-pip install requests
-```
 
 Edit `config.properties` with your credentials:
 
 ```properties
 ATLASSIAN_ORG_ID=your-org-id        # From admin.atlassian.com/o/<ORG_ID>/...
-ATLASSIAN_ADMIN_EMAIL=admin@co.com  # Org Admin account email (for reference)
+ATLASSIAN_ADMIN_EMAIL=admin@co.com  # Org Admin email (for reference)
 ATLASSIAN_API_TOKEN=your-token      # https://id.atlassian.com/manage-profile/security/api-tokens
 INPUT_FILE=sample_active_usage.csv  # Relative to repo root, or absolute path
-OUTPUT_FILE=                        # Leave blank to overwrite INPUT_FILE in-place
+OUTPUT_FILE=                        # Leave blank to update the input file in-place
 ```
 
 ## Usage
 
 ```bash
-# Standard run (reads INPUT_FILE from config, writes emails in-place)
-python fetch_user_emails.py
+# Preview what would be resolved without writing anything
+./fetch_user_emails.sh --dry-run
 
-# Write to a separate output file
-python fetch_user_emails.py --output results.csv
+# Standard run — interactively pick a directory, then update the CSV
+./fetch_user_emails.sh
 
-# Preview resolved emails without writing anything
-python fetch_user_emails.py --dry-run
+# Write to a separate output file (input file stays untouched)
+./fetch_user_emails.sh --output results.csv
 
 # Use a different config or input file
-python fetch_user_emails.py --config prod.properties --input /abs/path/to/users.csv
-
-# One-off credential override (no config file edit needed)
-python fetch_user_emails.py --org-id abc123 --api-token mytoken
+./fetch_user_emails.sh --config prod.properties --input /abs/path/to/users.csv
 ```
 
 ## How it works
 
-1. **Discovers directories** — `GET /admin/v2/orgs/{orgId}/directories`
-2. **Fetches users per directory** — `GET /admin/v2/orgs/{orgId}/directories/{dirId}/users` (paginated, runs for each directory)
-3. **Fetches org-level users** — `GET /admin/v1/orgs/{orgId}/users` (catches invited/unmanaged accounts not in any directory)
-4. **Enriches the CSV** — matches `user_id` → email, overwrites the `email` column; rows with no match get `NOT_FOUND`
+1. **Reads only unresolved rows** — skips any row that already has a real email (not blank, not `NOT_FOUND`)
+2. **Lists directories** — fetches all directories in your org and prompts you to pick one (auto-selects if only one exists)
+3. **Batch-queries** — sends the account IDs to `GET /admin/v2/orgs/{orgId}/directories/{dirId}/users?accountIds[]=...` in batches of 50
+4. **Partial update** — only overwrites rows that were successfully resolved; unresolved rows are left exactly as-is
+5. **Reports unresolved IDs** — if any account IDs weren't found in the chosen directory, lists them and suggests re-running with a different directory
 
-## Input CSV format
+## Re-running for unresolved users
 
-The script expects a column named `user_id` (configurable via `CSV_USER_ID_COLUMN`) containing Atlassian Account IDs. All other columns are preserved as-is.
+If some users belong to a different directory, just re-run the script and pick that directory. Already-resolved rows are skipped automatically, so you won't overwrite good data.
 
-```
-user_id,email,primary_email_domain,...
-712020:2fe0b840-...,placeholder,example.com,...
-6420f0fc67102fc717c1ccc9,placeholder,example.com,...
+```bash
+./fetch_user_emails.sh   # pick directory 2 this time
 ```
 
 ## Notes
 
-- `INPUT_FILE` / `OUTPUT_FILE` accept both **relative paths** (resolved from the repo root) and **absolute paths**.
-- Rate limits are handled automatically with exponential backoff.
-- All CLI flags override their `config.properties` equivalents.
+- `INPUT_FILE` / `OUTPUT_FILE` accept both **relative** (repo root) and **absolute** paths
+- Requires `curl` and `jq` — both included with macOS by default
+- The CSV is never fully overwritten — only resolved rows are updated per run
